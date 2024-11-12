@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Document Signature App</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        .container {
+            max-width: 900px;
+            width: 100%;
+        }
+        .upload-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .document-view {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            position: relative;
+        }
+        #documentDisplay {
+            max-width: 100%;
+            border: 1px solid #ccc;
+        }
+        #pdfCanvas {
+            max-width: 100%;
+            border: 1px solid #ccc;
+        }
+        #signatureCanvas {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            cursor: crosshair;
+            pointer-events: auto;
+        }
+        .button-container {
+            display: flex;
+            gap: 10px;
+            margin: 20px 0;
+            justify-content: center;
+        }
+        .pagination {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin: 10px 0;
+            justify-content: center;
+        }
+        button, .file-input-label {
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        .primary-btn {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .secondary-btn {
+            background-color: #2196F3;
+            color: white;
+        }
+        .danger-btn {
+            background-color: #f44336;
+            color: white;
+        }
+        button:hover, .file-input-label:hover {
+            opacity: 0.9;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        #fileInput {
+            display: none;
+        }
+        .file-input-label {
+            background-color: #2196F3;
+            color: white;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Document Signature App</h1>
+
+        <div class="upload-section">
+            <input type="file" id="fileInput" accept=".pdf,.png,.jpg,.jpeg" />
+            <label for="fileInput" class="file-input-label">Upload Document</label>
+        </div>
+
+        <div class="pagination">
+            <button id="prevPage" class="secondary-btn" disabled>Previous Page</button>
+            <span id="pageInfo">Page: 1 / 1</span>
+            <button id="nextPage" class="secondary-btn" disabled>Next Page</button>
+        </div>
+
+        <div class="document-view">
+            <canvas id="pdfCanvas"></canvas>
+            <img id="documentDisplay" style="display: none;" />
+            <canvas id="signatureCanvas"></canvas>
+        </div>
+
+        <div class="button-container">
+            <button id="clearBtn" class="danger-btn">Clear Signature</button>
+            <button id="saveBtn" class="primary-btn">Save Document</button>
+        </div>
+    </div>
+
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        const fileInput = document.getElementById('fileInput');
+        const documentDisplay = document.getElementById('documentDisplay');
+        const pdfCanvas = document.getElementById('pdfCanvas');
+        const signatureCanvas = document.getElementById('signatureCanvas');
+        const prevPageBtn = document.getElementById('prevPage');
+        const nextPageBtn = document.getElementById('nextPage');
+        const pageInfo = document.getElementById('pageInfo');
+        const clearBtn = document.getElementById('clearBtn');
+        const saveBtn = document.getElementById('saveBtn');
+
+        let currentPDF = null;
+        let currentPage = 1;
+        let totalPages = 1;
+
+        const ctx = signatureCanvas.getContext('2d');
+        let isDrawing = false;
+        let lastX = 0;
+        let lastY = 0;
+
+        function initializeCanvas(width, height) {
+            signatureCanvas.width = width;
+            signatureCanvas.height = height;
+            signatureCanvas.style.width = width + 'px';
+            signatureCanvas.style.height = height + 'px';
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 2;
+            ctx.lineCap = 'round';
+        }
+
+        fileInput.addEventListener('change', async function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            if (file.type === 'application/pdf') {
+                documentDisplay.style.display = 'none';
+                pdfCanvas.style.display = 'block';
+                
+                const arrayBuffer = await file.arrayBuffer();
+                currentPDF = await pdfjsLib.getDocument(arrayBuffer).promise;
+                totalPages = currentPDF.numPages;
+                currentPage = 1;
+                
+                updatePageButtons();
+                renderPDFPage(currentPage);
+            } else {
+                documentDisplay.style.display = 'block';
+                pdfCanvas.style.display = 'none';
+                currentPDF = null;
+                
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    documentDisplay.src = event.target.result;
+                    documentDisplay.onload = function() {
+                        initializeCanvas(documentDisplay.width, documentDisplay.height);
+                    };
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        async function renderPDFPage(pageNumber) {
+            const page = await currentPDF.getPage(pageNumber);
+            const viewport = page.getViewport({ scale: 1.5 });
+            
+            pdfCanvas.width = viewport.width;
+            pdfCanvas.height = viewport.height;
+            initializeCanvas(viewport.width, viewport.height);
+
+            await page.render({
+                canvasContext: pdfCanvas.getContext('2d'),
+                viewport: viewport
+            }).promise;
+
+            pageInfo.textContent = `Page: ${pageNumber} / ${totalPages}`;
+        }
+
+        prevPageBtn.addEventListener('click', () => {
+            if (currentPage > 1) {
+                currentPage--;
+                renderPDFPage(currentPage);
+                updatePageButtons();
+            }
+        });
+
+        nextPageBtn.addEventListener('click', () => {
+            if (currentPage < totalPages) {
+                currentPage++;
+                renderPDFPage(currentPage);
+                updatePageButtons();
+            }
+        });
+
+        function updatePageButtons() {
+            prevPageBtn.disabled = currentPage <= 1;
+            nextPageBtn.disabled = currentPage >= totalPages;
+            
+            if (currentPDF) {
+                prevPageBtn.style.display = 'block';
+                nextPageBtn.style.display = 'block';
+                pageInfo.style.display = 'block';
+            } else {
+                prevPageBtn.style.display = 'none';
+                nextPageBtn.style.display = 'none';
+                pageInfo.style.display = 'none';
+            }
+        }
+
+        function draw(e) {
+            if (!isDrawing) return;
+            const rect = signatureCanvas.getBoundingClientRect();
+            const scaleX = signatureCanvas.width / rect.width;
+            const scaleY = signatureCanvas.height / rect.height;
+            
+            const x = (e.clientX - rect.left) * scaleX;
+            const y = (e.clientY - rect.top) * scaleY;
+
+            ctx.beginPath();
+            ctx.moveTo(lastX, lastY);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+
+            [lastX, lastY] = [x, y];
+        }
+
+        signatureCanvas.addEventListener('mousedown', (e) => {
+            isDrawing = true;
+            const rect = signatureCanvas.getBoundingClientRect();
+            const scaleX = signatureCanvas.width / rect.width;
+            const scaleY = signatureCanvas.height / rect.height;
+            lastX = (e.clientX - rect.left) * scaleX;
+            lastY = (e.clientY - rect.top) * scaleY;
+        });
+
+        signatureCanvas.addEventListener('mousemove', draw);
+        signatureCanvas.addEventListener('mouseup', () => isDrawing = false);
+        signatureCanvas.addEventListener('mouseout', () => isDrawing = false);
+
+        clearBtn.addEventListener('click', () => {
+            ctx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
+        });
+
+        saveBtn.addEventListener('click', () => {
+            const combinedCanvas = document.createElement('canvas');
+            combinedCanvas.width = signatureCanvas.width;
+            combinedCanvas.height = signatureCanvas.height;
+            const combinedCtx = combinedCanvas.getContext('2d');
+
+            if (currentPDF) {
+                combinedCtx.drawImage(pdfCanvas, 0, 0);
+            } else {
+                combinedCtx.drawImage(documentDisplay, 0, 0);
+            }
+            combinedCtx.drawImage(signatureCanvas, 0, 0);
+
+            const link = document.createElement('a');
+            const filename = fileInput.files[0].name.split('.')[0];
+            link.download = `${filename}_signed.png`;
+            link.href = combinedCanvas.toDataURL('image/png');
+            link.click();
+        });
+
+        updatePageButtons();
+    </script>
+</body>
+</html>
